@@ -82,15 +82,13 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
             "text-generation",
             model=model_A,
             tokenizer=tokenizer,
-            torch_dtype=DTYPE,
-            device=0 # Or "cuda"
+            torch_dtype=DTYPE
         )
         pipe_B = pipeline(
             "text-generation",
             model=model_B,
             tokenizer=tokenizer,
-            torch_dtype=DTYPE,
-            device=0 # Or "cuda"
+            torch_dtype=DTYPE
         )
 
         print("Models loaded successfully.")
@@ -141,7 +139,7 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                 formatted_prompt,
                 max_new_tokens=150, # Adjust as needed
                 do_sample=True,
-                temperature=0.0, # Use lower temp for base model often
+                temperature=0.7, # Use lower temp for base model often
                 top_k=50,
                 top_p=0.95,
                 repetition_penalty=1.1,
