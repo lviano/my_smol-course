@@ -161,51 +161,90 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                 model_A_label = "Model A"
                 model_B_label = "Model B"
                 print(f" (Responses not swapped for judge)")
+            JUDGE_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2" # Or "mistralai/Mixtral-8x7B-Instruct-v0.1", "google/gemma-7b-it" etc.
+            # --- Load the Judge Model and Tokenizer ---
+            print(f"Loading judge model: {JUDGE_MODEL_NAME}...")
 
-            # Prepare judge prompt
-            judge_system_message = {
-                "role": "system",
-                "content": (
-                    "You are an impartial AI judge. Your task is to evaluate two responses (Response A and Response B) "
-                    "to a given prompt. Your criteria are: adherence to prompt, coherence, creativity, and overall quality. "
-                    "You MUST choose only one of the following options: 'A wins', 'B wins', or 'Tie'. "
-                    "Do NOT provide any other text, explanation, or reasoning."
-                )
-            }
-            judge_user_message = {
-                "role": "user",
-                "content": (
-                    f"Original Prompt:\n{user_prompt_content}\n\n"
-                    f"Response A:\n{response_for_judge_A}\n\n"
-                    f"Response B:\n{response_for_judge_B}\n\n"
-                    "Which response is better? Respond with 'A wins', 'B wins', or 'Tie'."
-                )
-            }
+            judge_tokenizer = AutoTokenizer.from_pretrained(JUDGE_MODEL_NAME)
+            # Ensure the tokenizer has a pad_token, critical for batching in pipelines
+            if judge_tokenizer.pad_token is None:
+                judge_tokenizer.pad_token = judge_tokenizer.eos_token
+            judge_tokenizer.padding_side = "left" # Often better for generation
+
+            judge_model = AutoModelForCausalLM.from_pretrained(
+                JUDGE_MODEL_NAME,
+                torch_dtype=DTYPE,
+                device_map=DEVICE
+            )
+            judge_model.eval() # Set to evaluation mode
+
+            # Create a text generation pipeline
+            judge_pipeline = pipeline(
+                "text-generation",
+                model=judge_model,
+                tokenizer=judge_tokenizer,
+                device=DEVICE, # Or directly use model.device if device_map="auto" was used
+                torch_dtype=DTYPE,
+                max_new_tokens=10, # Expect short output like "A wins"
+                temperature=0.0,   # Make it deterministic
+                do_sample=False,   # Ensure greedy decoding
+                eos_token_id=judge_tokenizer.eos_token_id,
+                pad_token_id=judge_tokenizer.pad_token_id # Important for batching, if you eventually judge multiple at once
+            )
+
+            # --- Inside your judging loop ---
+            # (Assume user_prompt_content, response_for_judge_A, response_for_judge_B, is_swapped are defined)
+
+            judge_system_message_content = (
+                "You are an impartial AI judge. Your task is to evaluate two responses (Response A and Response B) "
+                "to a given prompt. Your criteria are: adherence to prompt, coherence, creativity, and overall quality. "
+                "You MUST choose only one of the following options: 'A wins', 'B wins', or 'Tie'. "
+                "Do NOT provide any other text, explanation, or reasoning."
+            )
+            judge_user_message_content = (
+                f"Original Prompt:\n{user_prompt_content}\n\n"
+                f"Response A:\n{response_for_judge_A}\n\n"
+                f"Response B:\n{response_for_judge_B}\n\n"
+                "Which response is better? Respond with 'A wins', 'B wins', or 'Tie'."
+            )
+
+            # Format messages for the chosen model's chat template
+            # This is crucial for instruct-tuned models
+            judge_messages = [
+                {"role": "system", "content": judge_system_message_content},
+                {"role": "user", "content": judge_user_message_content}
+            ]
+
+            formatted_judge_prompt = judge_tokenizer.apply_chat_template(
+                judge_messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
 
             print(f"Querying judge model ({JUDGE_MODEL_NAME})...")
             try:
-                chat_completion = client.chat.completions.create(
-                    model=JUDGE_MODEL_NAME,
-                    messages=[judge_system_message, judge_user_message],
-                    temperature=0.0, # Make the judge deterministic
-                    max_tokens=10 # Expect a short answer
-                )
-                judge_decision = chat_completion.choices[0].message.content.strip().lower()
+                outputs = judge_pipeline(formatted_judge_prompt)
+                
+                # The output will contain the full prompt + generated text.
+                # We only want the generated text.
+                generated_text = outputs[0]['generated_text']
+                judge_decision = generated_text.replace(formatted_judge_prompt, '').strip().lower()
+
                 print(f"Judge decision: {judge_decision}")
 
-                # Parse judge decision
+                # Parse judge decision (remains the same)
                 if "a wins" in judge_decision:
-                    if is_swapped: # If A for judge was actual Model B
+                    if is_swapped:
                         wins_model_B += 1
                         print(f"Result: Model B (Original) wins for this prompt.")
-                    else: # If A for judge was actual Model A
+                    else:
                         wins_model_A += 1
                         print(f"Result: Model A (Fine-tuned) wins for this prompt.")
                 elif "b wins" in judge_decision:
-                    if is_swapped: # If B for judge was actual Model A
+                    if is_swapped:
                         wins_model_A += 1
                         print(f"Result: Model A (Fine-tuned) wins for this prompt.")
-                    else: # If B for judge was actual Model B
+                    else:
                         wins_model_B += 1
                         print(f"Result: Model B (Original) wins for this prompt.")
                 elif "tie" in judge_decision:
@@ -215,11 +254,8 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                     invalid_judgements += 1
                     print(f"Result: Invalid judgement '{judge_decision}'. Skipping this comparison.")
 
-            except openai.OpenAIError as e:
-                print(f"Error querying OpenAI API: {e}")
-                invalid_judgements += 1
-            except Exception as e:
-                print(f"An unexpected error occurred during judging: {e}")
+            except Exception as e: # Catch any errors from pipeline execution
+                print(f"An error occurred during judge model inference: {e}")
                 invalid_judgements += 1
 
             # Small delay to avoid hitting API rate limits
