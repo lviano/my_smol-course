@@ -445,7 +445,10 @@ for epoch in range(EPOCHS):
             eval_progress_bar.set_postfix({"eval_loss": eval_loss / (eval_progress_bar.n + 1)})
             
     print(f"Epoch {epoch+1} finished. Average Evaluation Loss: {eval_loss / len(eval_dataloader)}")
-
+    final_model_path = os.path.join(OUTPUT_DIR, f"epoch{epoch+1}")
+    policy_model.save_pretrained(final_model_path)
+    tokenizer.save_pretrained(final_model_path)
+    print(f"Model saved to {final_model_path}")
 # --- Save the fine-tuned model ---
 # Save the LoRA adapter
 final_model_path = os.path.join(OUTPUT_DIR, "final_checkpoint")
