@@ -22,12 +22,12 @@ import math
 # --- Configuration ---
 MODEL_ID = "HuggingFaceTB/SmolLM2-135M-Instruct" # A small model for quick demonstration
 DATASET_ID = "HuggingFaceH4/ultrafeedback_binarized" #"HuggingFaceH4/ultrafeedback_binarized"
-OUTPUT_DIR = "./ratings_dpo_custom_tinyllama_ultrafeedback"
+OUTPUT_DIR = "./checkpoints/lviano-sandbox/ratings_dpo/SmolLM2-135M"
 
 # Training parameters
-NUM_TRAIN_EXAMPLES = 1000 # Use a small subset for demonstration
+NUM_TRAIN_EXAMPLES = 30000 # Use a small subset for demonstration
 NUM_EVAL_EXAMPLES = 200
-EPOCHS = 1
+EPOCHS = 10
 LEARNING_RATE = 1e-5 # DPO often uses a lower learning rate than SFT
 BETA = 0.1 # DPO beta parameter, controls the strength of the preference. Common values: 0.1, 0.5, 0.8
 BETA1 = 0.3
@@ -280,8 +280,6 @@ class DPODataCollator:
 
         # Convert prompt_len to tensor
         batch['prompt_len'] = torch.tensor(batch['prompt_len'], dtype=torch.long)
-        print(batch['score_chosen'])
-        print(batch['score_rejected'])
         batch['score_chosen'] = torch.tensor(batch['score_chosen'], dtype=DTYPE)
         batch['score_rejected'] = torch.tensor(batch['score_rejected'], dtype=DTYPE)
         
@@ -457,55 +455,3 @@ print(f"Model saved to {final_model_path}")
 
 print("DPO with ratings training complete!")
 
-# --- Optional: Test the trained model ---
-if DEVICE == "cuda":
-    print("\n--- Testing the trained model ---")
-    from transformers import pipeline
-    from peft import PeftModel
-
-    # Load the base model
-    test_model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        torch_dtype=DTYPE,
-        device_map=DEVICE
-    )
-    # Load the LoRA adapter and merge
-    test_model = PeftModel.from_pretrained(test_model, final_model_path)
-    test_model = test_model.merge_and_unload() # Merge LoRA weights into base model
-    test_model.eval()
-
-    pipe = pipeline(
-        "text-generation",
-        model=test_model,
-        tokenizer=tokenizer,
-        torch_dtype=DTYPE,
-        device=0
-    )
-
-    test_prompt_message = [{"role": "user", "content": "Write a short, heartwarming story about an old cat."}]
-    test_prompt = tokenizer.apply_chat_template(
-        test_prompt_message,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    print(f"Generating response for prompt:\n{test_prompt}")
-    
-    outputs = pipe(
-        test_prompt,
-        max_new_tokens=100,
-        do_sample=True,
-        temperature=0.7,
-        top_k=50,
-        top_p=0.95,
-        repetition_penalty=1.1,
-        eos_token_id=tokenizer.eos_token_id
-    )
-    print("\nGenerated Response (full):")
-    print(outputs[0]['generated_text'])
-    
-    generated_text_only = outputs[0]['generated_text'].replace(test_prompt, '').strip()
-    print("\nGenerated Response (clean):")
-    print(generated_text_only)
-else:
-    print("\nSkipping model testing: CUDA not available. Run on GPU for testing.")

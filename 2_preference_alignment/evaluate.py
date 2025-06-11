@@ -4,13 +4,14 @@ from peft import PeftModel
 import random
 import os
 import time
+JUDGE_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2" # Or "mistralai/Mixtral-8x7B-Instruct-v0.1", "google/gemma-7b-it" etc.
 MODEL_ID = "HuggingFaceTB/SmolLM2-135M-Instruct"
 for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct", 
-            "./dpo_custom_tinyllama_ultrafeedback",
-            "./ratings_dpo_custom_tinyllama_ultrafeedback"]:
+            "./checkpoints/lviano-sandbox/dpo/SmolLM2-135M/final_checkpoint",
+            "./checkpoints/lviano-sandbox/ratings_dpo/SmolLM2-135M/final_checkpoint"]:
     for llm2 in ["HuggingFaceTB/SmolLM2-135M-Instruct", 
-            "./dpo_custom_tinyllama_ultrafeedback",
-            "./ratings_dpo_custom_tinyllama_ultrafeedback"]:
+            "./checkpoints/lviano-sandbox/dpo/SmolLM2-135M/final_checkpoint",
+            "./checkpoints/lviano-sandbox/ratings_dpo/SmolLM2-135M/final_checkpoint"]:
         # --- Configuration (from your original snippet or similar) ---
         if torch.cuda.is_available():
             DEVICE = "cuda"
@@ -23,19 +24,6 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
         else:
             DEVICE = "cpu"
             DTYPE = torch.float32 # CPU runs best with float32
-        # --- Judge Model Configuration ---
-        # For OpenAI API (Recommended for Judge)
-        # Make sure to pip install openai
-        import openai
-        from openai import OpenAI
-        # Set your OpenAI API key
-        # os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY" # Better to set as environment variable
-        # If you set it as an env variable, it's picked up automatically:
-        # client = OpenAI()
-        # Or pass it explicitly:
-        # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        client = OpenAI(api_key="YOUR_OPENAI_API_KEY") # Replace with your actual key or set env var
-        JUDGE_MODEL_NAME = "gpt-4-turbo" # Or "gpt-3.5-turbo", "claude-3-opus-20240229", etc.
 
         print("\n--- Loading models for comparison ---")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -161,7 +149,6 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                 model_A_label = "Model A"
                 model_B_label = "Model B"
                 print(f" (Responses not swapped for judge)")
-            JUDGE_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2" # Or "mistralai/Mixtral-8x7B-Instruct-v0.1", "google/gemma-7b-it" etc.
             # --- Load the Judge Model and Tokenizer ---
             print(f"Loading judge model: {JUDGE_MODEL_NAME}...")
 
@@ -183,7 +170,6 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                 "text-generation",
                 model=judge_model,
                 tokenizer=judge_tokenizer,
-                device=DEVICE, # Or directly use model.device if device_map="auto" was used
                 torch_dtype=DTYPE,
                 max_new_tokens=10, # Expect short output like "A wins"
                 temperature=0.0,   # Make it deterministic
@@ -231,22 +217,23 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
                 judge_decision = generated_text.replace(formatted_judge_prompt, '').strip().lower()
 
                 print(f"Judge decision: {judge_decision}")
-
+                print(f"{llm1} generated: {generated_text_A}")
+                print(f"{llm2} generated: {generated_text_B}")
                 # Parse judge decision (remains the same)
                 if "a wins" in judge_decision:
                     if is_swapped:
                         wins_model_B += 1
-                        print(f"Result: Model B (Original) wins for this prompt.")
+                        print(f"Result: {llm2} wins over {llm1} for this prompt.")
                     else:
                         wins_model_A += 1
-                        print(f"Result: Model A (Fine-tuned) wins for this prompt.")
+                        print(f"Result: {llm1} wins over {llm2} for this prompt.")
                 elif "b wins" in judge_decision:
                     if is_swapped:
                         wins_model_A += 1
-                        print(f"Result: Model A (Fine-tuned) wins for this prompt.")
+                        print(f"Result: {llm1} wins over {llm2} for this prompt.")
                     else:
                         wins_model_B += 1
-                        print(f"Result: Model B (Original) wins for this prompt.")
+                        print(f"Result: {llm2} wins over {llm1} for this prompt.")
                 elif "tie" in judge_decision:
                     ties += 1
                     print(f"Result: Tie for this prompt.")
@@ -264,8 +251,8 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
         # --- Final Results ---
         print("\n--- Evaluation Summary ---")
         print(f"Total Comparisons: {total_comparisons}")
-        print(f"Model A (Fine-tuned) Wins: {wins_model_A}")
-        print(f"Model B (Original) Wins: {wins_model_B}")
+        print(f"{llm1} Wins: {wins_model_A}")
+        print(f"{llm2} Wins: {wins_model_B}")
         print(f"Ties: {ties}")
         print(f"Invalid Judgements: {invalid_judgements}")
 
@@ -274,8 +261,8 @@ for llm1 in ["HuggingFaceTB/SmolLM2-135M-Instruct",
             win_rate_A = (wins_model_A / effective_comparisons) * 100
             win_rate_B = (wins_model_B / effective_comparisons) * 100
             tie_rate = (ties / effective_comparisons) * 100
-            print(f"\nWinning Rate for {llm1} (Fine-tuned): {win_rate_A:.2f}%")
-            print(f"Winning Rate for {llm2} (Original): {win_rate_B:.2f}%")
+            print(f"\nWinning Rate for {llm1}: {win_rate_A:.2f}%")
+            print(f"Winning Rate for {llm2}: {win_rate_B:.2f}%")
             print(f"Tie Rate: {tie_rate:.2f}%")
         else:
             print("\nNot enough valid comparisons to compute rates.")
